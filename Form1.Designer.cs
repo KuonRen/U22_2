@@ -28,6 +28,7 @@
         /// </summary>
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             this.instantreplay_ONOFF_button = new System.Windows.Forms.Button();
             this.rec_save_button = new System.Windows.Forms.Button();
             this.settings_button = new System.Windows.Forms.Button();
@@ -129,6 +130,7 @@
             this.Controls.Add(this.rec_now_label);
             this.Controls.Add(this.rec_save_button);
             this.Controls.Add(this.instantreplay_ONOFF_button);
+            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(2);
             this.Name = "Form1";
             this.Text = "ClipperInstantReplay";
