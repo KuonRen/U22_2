@@ -72,8 +72,33 @@ namespace ClipperInstantReplay
                 return;
             }
 
+            // システム上の有効な入力（録音）デバイスの一覧を取得
+            var inputDeviceNames = Enumerable.Range(0, WaveIn.DeviceCount)
+                .Select(i => WaveIn.GetCapabilities(i).ProductName)
+                .ToList();
 
-            if (!Properties.Settings.Default.set_output_device.Contains("ステレオ ミキサー"))
+            // ステレオミキサーが選択されているかを格納する変数
+            bool mixerSelected = false;
+
+            if (inputDeviceNames.Contains(Properties.Settings.Default.set_output_device))
+            {
+                // ステレオミキサーを変別するための配列
+                string[] mixerKeywords =
+                    {
+                "ステレオ ミキサー", // 日本語環境の一般的名称
+                "Stereo Mix",        // 英語環境
+                "Stereo Mixer",      // 一部のドライバ
+                "What U Hear",       // Sound Blaster系
+                "再生リダイレクト"   // 古いドライバなど
+                // 名前の中にキーワードが含まれているかチェック
+            };
+                mixerSelected = mixerKeywords.Any(keyword =>
+                Properties.Settings.Default.set_output_device.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
+                ;
+            }
+
+            // ミキサーが選択されていないかつenable_audioがtrueの場合
+            if (!mixerSelected && Properties.Settings.Default.enable_audio)
             {
                 // ステレオミキサーが選択されていない場合の警告メッセージ
                 string message = "ステレオミキサーが選択されていません。このまま続けると、システム音声が録音されない可能性があります。実行しますか？";
@@ -85,14 +110,13 @@ namespace ClipperInstantReplay
                 // ユーザーの選択をチェック
                 if (result == DialogResult.Yes)
                 {
-                    // 「はい」が押された場合、録音処理を続行
-                    // 例：StartRecordingMethod();
-                    MessageBox.Show("録音を開始します。");
+                    // 「はい」が押された場合、録画処理を続行
+                    Properties.Settings.Default.enable_audio = false;
                 }
                 else
                 {
                     // 「いいえ」が押された場合、処理を中断
-                    return; // このメソッドを抜けて、録音処理を行わない
+                    return; // このメソッドを抜けて、録画処理を行わない
                 }
             }
 
@@ -147,6 +171,9 @@ namespace ClipperInstantReplay
             // Alt + F10 をグローバルホットキーとして登録
             RegisterHotKey(this.Handle, HOTKEY_ID, MOD_ALT, (int)Keys.F10);
 
+            // 録音を行うかを格納する変数
+            Properties.Settings.Default.enable_audio = true;
+
             // ffmpegが既に実行中の場合は、インスタントリプレイを停止
             Process[] processes = Process.GetProcessesByName("ffmpeg");
             if (processes.Length > 0)
@@ -179,7 +206,7 @@ namespace ClipperInstantReplay
             Process[] processes = Process.GetProcessesByName("ffmpeg");
             if (processes.Length > 0)
             {
-                recorder.stop_instantreplay();
+                recorder.stop_instantreplay(); // バグ
             }
         }
 
@@ -204,15 +231,28 @@ namespace ClipperInstantReplay
 
                 ffmpegProcess = new Process();
                 ffmpegProcess.StartInfo.FileName = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
-                ffmpegProcess.StartInfo.Arguments =
-                    $"-y -video_size 1920x1080 -framerate 60 " +
-                    $"-f gdigrab -framerate 60 -draw_mouse 0 " +
-                    $"-f gdigrab -i desktop " +
-                    $"-f dshow -i audio=\"{set_output_device}\" " +
-                    $"-map 0:v:0 -map 1:a:0 " +
-                    $"-vcodec libx264 -pix_fmt yuv420p -acodec aac -b:a 320k -ac 2 -ar 44100 " +
-                    $"\"{tempRecordingPath}\"";
 
+                if (Properties.Settings.Default.enable_audio)
+                {
+                    ffmpegProcess.StartInfo.Arguments =
+                        $"-y -video_size 1920x1080 -framerate 60 " +
+                        $"-f gdigrab -framerate 60 -draw_mouse 0 " +
+                        $"-f gdigrab -i desktop " +
+                        $"-f dshow -i audio=\"{set_output_device}\" " +
+                        $"-map 0:v:0 -map 1:a:0 " +
+                        $"-vcodec libx264 -pix_fmt yuv420p -acodec aac -b:a 320k -ac 2 -ar 44100 " +
+                        $"\"{tempRecordingPath}\"";
+                }
+                else
+                {
+                    ffmpegProcess.StartInfo.Arguments =
+                        $"-y -video_size 1920x1080 -framerate 60 " +
+                        $"-f gdigrab -framerate 60 -draw_mouse 0 " +
+                        $"-f gdigrab -i desktop " +
+                        $"-map 0:v:0 " +                       // ビデオストリーム(0)のみをマッピング
+                        $"-vcodec libx264 -pix_fmt yuv420p " + // ビデオコーデック関連のみ
+                        $"\"{tempRecordingPath}\"";
+                }
                 ffmpegProcess.StartInfo.CreateNoWindow = true;
                 ffmpegProcess.StartInfo.UseShellExecute = false;
                 ffmpegProcess.StartInfo.RedirectStandardOutput = false;
@@ -224,23 +264,22 @@ namespace ClipperInstantReplay
 
             public void stop_instantreplay()
             {
-                try
+                // プロセスが既に終了していないか確認
+                if (ffmpegProcess != null && !ffmpegProcess.HasExited)
                 {
-                    if (ffmpegProcess != null && !ffmpegProcess.HasExited)
-                    {
-                        ffmpegProcess.StandardInput.WriteLine("q");
+                    // qで終了を送信
+                    ffmpegProcess.StandardInput.WriteLine("q");
+                    ffmpegProcess.StandardInput.Flush(); // バッファを確実に送信
+                    ffmpegProcess.StandardInput.Close(); // 入力ストリームを閉じる
 
-                        // プロセスが終了するまで最大5秒待機
-                        if (!ffmpegProcess.WaitForExit(5000))
-                        {
-                            // 5秒経っても終了しない場合は強制終了
-                            ffmpegProcess.Kill();
-                        }
+
+                    // プロセスが終了するまで2秒待機
+                    if (!ffmpegProcess.WaitForExit(2000))
+                    {
+                        // 終了しない場合は強制終了
+                        ffmpegProcess.Kill();
+                        ffmpegProcess.WaitForExit(); // Kill後の完全終了を待つ
                     }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"FFmpegプロセスの停止中にエラーが発生しました: {ex.Message}");
                 }
             }
 

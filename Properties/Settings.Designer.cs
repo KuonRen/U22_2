@@ -106,5 +106,17 @@ namespace ClipperInstantReplay.Properties {
                 this["cut_folderpath"] = value;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool enable_audio {
+            get {
+                return ((bool)(this["enable_audio"]));
+            }
+            set {
+                this["enable_audio"] = value;
+            }
+        }
     }
 }
